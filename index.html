@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vite + TS</title>
+</head>
+
+<body>
+  <div id="app" class="p-2">
+    <button class="acquire border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Acquire video</button>
+    <button class="init border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Initialize
+      Encoder</button>
+    <br>
+    <div class="flex gap-2 my-4 w-full justify-between">
+      <div class="local w-1/2 h-72 border border-black px-2">Local Video</div>
+      <div class="remote w-1/2 h-72 border border-black px-2">Remote Video</div>
+    </div>
+    <div class="output">Output:</div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
