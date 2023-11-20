@@ -1,4 +1,4 @@
-import { WorkerData } from ".";
+import { EncoderConfig, WorkerData } from ".";
 import { Decoder } from "./decoder";
 import { Encoder } from "./encoder";
 
@@ -8,7 +8,7 @@ const DefaultConfig: VideoEncoderConfig = {
     width: 640,
     height: 480,
     bitrate: 2_000_000, // 2 Mbps
-    framerate: 30,
+    framerate: 60,
 }
 
 class Pipeline {
@@ -27,8 +27,8 @@ class Pipeline {
         self.postMessage({ type: 'log', data: "pipeline is initialized..." })
     }
 
-    public initEncoder(config: VideoEncoderConfig) {
-        this.encoder = new Encoder(config ?? this.config, this.onEncodedChunk.bind(this));
+    public initEncoder({ config, source }: EncoderConfig) {
+        this.encoder = new Encoder(config ?? this.config, source, this.onEncodedChunk.bind(this));
         self.postMessage({ type: 'log', data: "encoder created and inited" })
     }
 
@@ -90,7 +90,7 @@ self.addEventListener('message', ({ data }: { data: WorkerData }) => {
             if (pipeline?.encoder) {
                 return
             }
-            pipeline?.initEncoder(data.data as VideoEncoderConfig)
+            pipeline?.initEncoder(data.data as EncoderConfig)
             break;
         case 'init-decoder':
             if (pipeline?.decoder) {

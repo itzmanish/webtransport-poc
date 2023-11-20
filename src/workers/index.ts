@@ -5,5 +5,5 @@ export interface WorkerData {
 
 export interface EncoderConfig {
     config?: VideoEncoderConfig;
-    track: MediaStreamTrack
+    source: ReadableStream<VideoFrame>
 }

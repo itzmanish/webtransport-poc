@@ -57,9 +57,8 @@ acquire.addEventListener('click', async () => {
 // init encoder for encoding
 initEncoder.addEventListener('click', () => {
   logger.write("starting encoding...")
-  pipelineWorker?.postMessage({ type: 'init-encoder' })
   const sink = new MediaStreamTrackProcessor({ track: sourceTrack })
-  readAndEncode(sink.readable.getReader())
+  pipelineWorker?.postMessage({ type: 'init-encoder', data: { source: sink.readable } }, [sink.readable])
   logger.write("encoding in progress...")
 })
 
@@ -91,17 +90,6 @@ const startTrackWriterWorker = async () => {
   }
 }
 
-const readAndEncode = (reader: ReadableStreamDefaultReader<VideoFrame>) => {
-  reader.read().then((result) => {
-    // App handling for stream closure.
-    if (result.done)
-      return;
-    pipelineWorker?.postMessage({ type: 'media', data: result.value })
-    result.value.close()
-    // Keep reading until the stream closes.
-    readAndEncode(reader);
-  })
-}
 
 const appendVideo = (selector: string, stream: MediaStream) => {
   const videoNode = document.createElement("video")

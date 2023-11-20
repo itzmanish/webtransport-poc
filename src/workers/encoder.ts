@@ -4,9 +4,10 @@ export class Encoder {
     private encoder: VideoEncoder;
     private config: VideoEncoderConfig;
     private keyframe: boolean;
+    private source: ReadableStream<VideoFrame>;
     private onEncoded: (chunk: EncodedVideoChunk) => void;
 
-    public constructor(config: VideoEncoderConfig, onEncode: (_: EncodedVideoChunk) => void) {
+    public constructor(config: VideoEncoderConfig, source: ReadableStream<VideoFrame>, onEncode: (_: EncodedVideoChunk) => void) {
         this.encoder = new VideoEncoder({
             output: this.onEncodedPackets.bind(this),
             error: this.onError.bind(this),
@@ -14,7 +15,9 @@ export class Encoder {
         this.config = config
         this.encoder.configure(config)
         this.keyframe = true
-        this.onEncoded = onEncode;
+        this.source = source
+        this.onEncoded = onEncode
+        this.readAndEncode()
     }
 
     public getKeyFrame() {
@@ -41,5 +44,18 @@ export class Encoder {
 
 
 
+    private async readAndEncode() {
+        const reader = this.source.getReader()
+        const result = await reader.read()
+        // App handling for stream closure.
+        if (result.done)
+            return;
+        //   self.postMessage({ type: 'media', data: result.value })
+        this.encode(result.value)
+        result.value.close()
+        reader.releaseLock()
+        // Keep reading until the stream closes.
+        this.readAndEncode();
+    }
 }
 
