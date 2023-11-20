@@ -11,14 +11,23 @@
 <body>
   <div id="app" class="p-2">
     <button class="acquire border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Acquire video</button>
-    <button class="init border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Initialize
+    <button class="init-encoder border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Initialize
       Encoder</button>
+    <button class="init-decoder border border-black rounded px-2 py-1 hover:bg-black hover:text-white">Initialize
+      Decoder</button>
     <br>
     <div class="flex gap-2 my-4 w-full justify-between">
       <div class="local w-1/2 h-72 border border-black px-2">Local Video</div>
       <div class="remote w-1/2 h-72 border border-black px-2">Remote Video</div>
     </div>
-    <div class="output">Output:</div>
+    <div class="metrics my-2">
+      <div>Metrics:</div>
+      <div class="frames-count"></div>
+      <div class="sent-bytes"></div>
+    </div>
+    <div class="my-2">Output: </div>
+    <div class="w-full border border-black p-2 overflow-y-scroll h-72 output"></div>
+
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

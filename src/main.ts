@@ -1,58 +1,106 @@
+import { Logger } from "./logger";
 import "./style.css"
+import { WorkerData } from "./workers"
+import PipelineWorker from "./workers/pipeline?worker";
 
 var acquire = document.querySelector<HTMLButtonElement>(".acquire")!
-var initEncoder = document.querySelector<HTMLButtonElement>(".init")!
+var initEncoder = document.querySelector<HTMLButtonElement>(".init-encoder")!
+var initDecoder = document.querySelector<HTMLButtonElement>(".init-decoder")!
 var output = document.querySelector<HTMLDivElement>(".output")!
+var framesCount = document.querySelector<HTMLDivElement>(".frames-count")!
 
-var videoTrack: MediaStreamTrack;
+var sourceTrack: MediaStreamTrack;
+var outputTrack: WritableStream<VideoFrame>;
+var pipelineWorker: Worker | undefined;
+var buffer: VideoFrame[] = [];
+const logger = new Logger(output)
 
+// setup web workers
+document.addEventListener('DOMContentLoaded', () => {
+  logger.write('initializing pipline worker...')
+  pipelineWorker = new PipelineWorker({
+    name: 'media-worker'
+  })
+  pipelineWorker.addEventListener('message', ({ data }: { data: WorkerData }) => {
+    switch (data.type) {
+      case 'log':
+        logger.write(data.data)
+        break;
+      case 'metrics':
+        const { totalFrames } = data.data as any
+        framesCount.innerText = "total frames processed: " + totalFrames
+        break
+      case 'media':
+        buffer.push(data.data as VideoFrame)
+        break
+      default:
+        break
+    }
+  })
+  pipelineWorker.addEventListener('error', (error) => {
+    console.error('error on worker', error)
+    logger.write("got error on worker", error.message)
+  })
+  pipelineWorker.postMessage({ type: 'init' })
+
+})
+
+// acquire media track
 acquire.addEventListener('click', async () => {
-  writeOutput("acquiring video track...")
+  logger.write("acquiring video track...")
   const stream = await navigator.mediaDevices.getUserMedia({ video: true })
   appendVideo(".local", stream)
-  videoTrack = stream.getVideoTracks()[0]
-  writeOutput("media stream acquired. stream id:", stream.id)
+  sourceTrack = stream.getVideoTracks()[0]
+  logger.write("media stream acquired. stream id:", stream.id)
 })
 
+// init encoder for encoding
 initEncoder.addEventListener('click', () => {
-  writeOutput("starting encoding...")
-  const trackProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
-  const videoEncoder = new VideoEncoder({
-    output: onEncodedPackets,
-    error: onEncodeError
-  })
-  videoEncoder.configure({
-    codec: 'vp8',
-    bitrate: 1_000_000,
-    framerate: 25,
-    width: 1280,
-    height: 720,
-  })
-  readAndEncode(trackProcessor.readable.getReader(), videoEncoder)
-  writeOutput("encoding in progress...")
+  logger.write("starting encoding...")
+  pipelineWorker?.postMessage({ type: 'init-encoder' })
+  const sink = new MediaStreamTrackProcessor({ track: sourceTrack })
+  readAndEncode(sink.readable.getReader())
+  logger.write("encoding in progress...")
 })
 
-// Helper to feed raw media to encoders as fast as possible.
-const readAndEncode = (reader: ReadableStreamDefaultReader<VideoFrame>, encoder: VideoEncoder) => {
+// init decoder for decoding
+initDecoder.addEventListener('click', () => {
+  logger.write('starting decoding...')
+  const generator = new MediaStreamTrackGenerator({ kind: 'video' })
+  outputTrack = generator.writable
+  appendVideo('.remote', new MediaStream([generator as any]))
+  pipelineWorker?.postMessage({
+    type: 'init-decoder',
+  })
+  startTrackWriterWorker()
+})
+
+const startTrackWriterWorker = async () => {
+  while (true) {
+    const frame = buffer.pop()
+    if (!frame) {
+      await new Promise(r => setTimeout(r, 10))
+      continue
+    }
+    const writer = outputTrack.getWriter()
+    await writer.ready
+    await writer.write(frame)
+    frame?.close()
+    await writer.ready
+    writer.releaseLock()
+  }
+}
+
+const readAndEncode = (reader: ReadableStreamDefaultReader<VideoFrame>) => {
   reader.read().then((result) => {
     // App handling for stream closure.
     if (result.done)
       return;
-    writeOutput("got packet for encoding:", result.value)
-    // Encode!
-    encoder.encode(result.value);
-
+    pipelineWorker?.postMessage({ type: 'media', data: result.value })
+    result.value.close()
     // Keep reading until the stream closes.
-    readAndEncode(reader, encoder);
+    readAndEncode(reader);
   })
-}
-
-const onEncodedPackets = (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
-  writeOutput("chunks:", chunk.byteLength, "metadata:", JSON.stringify(metadata, undefined, 2))
-}
-
-const onEncodeError = (error: any) => {
-  writeOutput("error:", error)
 }
 
 const appendVideo = (selector: string, stream: MediaStream) => {
@@ -63,16 +111,4 @@ const appendVideo = (selector: string, stream: MediaStream) => {
   videoNode.autoplay = true
   videoNode.srcObject = stream
   document.querySelector<HTMLDivElement>(selector)!.append(videoNode)
-}
-
-
-const writeOutput = (...info: unknown[]) => {
-  const node = document.createElement("div")
-  node.innerText = info.reduce((acc, value) => {
-    if (acc === "") {
-      return value
-    }
-    return acc + " " + value
-  }, "") as string
-  output.append(node)
 }
