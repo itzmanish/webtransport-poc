@@ -1,27 +1,38 @@
 import { Logger } from "./logger";
 import "./style.css"
-import { WorkerData } from "./workers"
-import PipelineWorker from "./workers/pipeline?worker";
+import { Transport } from "./transport";
+import { WorkerData } from "./media-worker"
+import MediaWorker from "./media-worker/worker?worker";
 
 var acquire = document.querySelector<HTMLButtonElement>(".acquire")!
+var initTransport = document.querySelector<HTMLButtonElement>(".init-transport")!
 var initEncoder = document.querySelector<HTMLButtonElement>(".init-encoder")!
 var initDecoder = document.querySelector<HTMLButtonElement>(".init-decoder")!
 var output = document.querySelector<HTMLDivElement>(".output")!
 var framesCount = document.querySelector<HTMLDivElement>(".frames-count")!
 
+const fingerprintHex = import.meta.env.VITE_FINGERPRINT_HEX ?? "";
+// Convert the hex to binary.
+let fingerprint: number[] = [];
+for (let c = 0; c < fingerprintHex.length - 1; c += 2) {
+    fingerprint.push(parseInt(fingerprintHex.substring(c, c + 2), 16));
+}
+
 var sourceTrack: MediaStreamTrack;
 var outputTrack: WritableStream<VideoFrame>;
-var pipelineWorker: Worker | undefined;
+var mediaWorker: Worker | undefined;
 var buffer: VideoFrame[] = [];
+var transport: Transport;
+
 const logger = new Logger(output)
 
 // setup web workers
 document.addEventListener('DOMContentLoaded', () => {
   logger.write('initializing pipline worker...')
-  pipelineWorker = new PipelineWorker({
+  mediaWorker = new MediaWorker({
     name: 'media-worker'
   })
-  pipelineWorker.addEventListener('message', ({ data }: { data: WorkerData }) => {
+  mediaWorker.addEventListener('message', ({ data }: { data: WorkerData }) => {
     switch (data.type) {
       case 'log':
         logger.write(data.data)
@@ -37,12 +48,11 @@ document.addEventListener('DOMContentLoaded', () => {
         break
     }
   })
-  pipelineWorker.addEventListener('error', (error) => {
+  mediaWorker.addEventListener('error', (error) => {
     console.error('error on worker', error)
     logger.write("got error on worker", error.message)
   })
-  pipelineWorker.postMessage({ type: 'init' })
-
+  mediaWorker.postMessage({ type: 'init' })
 })
 
 // acquire media track
@@ -54,11 +64,19 @@ acquire.addEventListener('click', async () => {
   logger.write("media stream acquired. stream id:", stream.id)
 })
 
+// Init transport for connecting webtransport
+initTransport.addEventListener('click', async () => {
+  logger.write('connecting webtransport..')
+  logger.write('cert hex', fingerprintHex, "cert", fingerprint)
+  transport = new Transport("https://localhost:4443", new Uint8Array(fingerprint))
+  await transport.ready;
+})
+
 // init encoder for encoding
 initEncoder.addEventListener('click', () => {
   logger.write("starting encoding...")
   const sink = new MediaStreamTrackProcessor({ track: sourceTrack })
-  pipelineWorker?.postMessage({ type: 'init-encoder', data: { source: sink.readable } }, [sink.readable])
+  mediaWorker?.postMessage({ type: 'init-encoder', data: { source: sink.readable } }, [sink.readable])
   logger.write("encoding in progress...")
 })
 
@@ -68,7 +86,7 @@ initDecoder.addEventListener('click', () => {
   const generator = new MediaStreamTrackGenerator({ kind: 'video' })
   outputTrack = generator.writable
   appendVideo('.remote', new MediaStream([generator as any]))
-  pipelineWorker?.postMessage({
+  mediaWorker?.postMessage({
     type: 'init-decoder',
   })
   startTrackWriterWorker()
