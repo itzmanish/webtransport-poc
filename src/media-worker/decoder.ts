@@ -4,6 +4,10 @@ export class Decoder {
     private decoder: VideoDecoder;
     private onFrame: (frame: VideoFrame) => void;
 
+    get codecState() {
+        return this.decoder.state
+    }
+
     constructor(config: VideoDecoderConfig, onFrame: (frame: VideoFrame) => void) {
         this.config = config
         this.decoder = new VideoDecoder({
@@ -19,8 +23,11 @@ export class Decoder {
         frame.close()
     }
 
-    public decode(chunk: EncodedVideoChunk) {
+    public async decode(chunk: EncodedVideoChunk) {
         this.decoder.decode(chunk)
+        // if (chunk.type === 'key') {
+        //     await this.decoder.flush()
+        // }
     }
 
     public onError(error: Error) {

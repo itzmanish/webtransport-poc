@@ -42,8 +42,6 @@ export class Encoder {
         throw error;
     }
 
-
-
     private async readAndEncode() {
         const reader = this.source.getReader()
         const result = await reader.read()

@@ -1,3 +1,6 @@
+// @ts-ignore embed the certificate fingerprint using bundler
+import fingerprintHex from '../../cert/localhost.hex?raw';
+
 import { Logger } from "./logger";
 import "./style.css"
 import { Transport } from "./transport";
@@ -11,11 +14,10 @@ var initDecoder = document.querySelector<HTMLButtonElement>(".init-decoder")!
 var output = document.querySelector<HTMLDivElement>(".output")!
 var framesCount = document.querySelector<HTMLDivElement>(".frames-count")!
 
-const fingerprintHex = import.meta.env.VITE_FINGERPRINT_HEX ?? "";
 // Convert the hex to binary.
 let fingerprint: number[] = [];
 for (let c = 0; c < fingerprintHex.length - 1; c += 2) {
-    fingerprint.push(parseInt(fingerprintHex.substring(c, c + 2), 16));
+  fingerprint.push(parseInt(fingerprintHex.substring(c, c + 2), 16));
 }
 
 var sourceTrack: MediaStreamTrack;
@@ -68,8 +70,13 @@ acquire.addEventListener('click', async () => {
 initTransport.addEventListener('click', async () => {
   logger.write('connecting webtransport..')
   logger.write('cert hex', fingerprintHex, "cert", fingerprint)
-  transport = new Transport("https://localhost:4443", new Uint8Array(fingerprint))
-  await transport.ready;
+  mediaWorker?.postMessage({
+    type: 'init-transport', data: {
+      url: "https://localhost:4443",
+      fingerprint: new Uint8Array(fingerprint)
+    }
+  })
+  logger.write('webtransport connected...')
 })
 
 // init encoder for encoding

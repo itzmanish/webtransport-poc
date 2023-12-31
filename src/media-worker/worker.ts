@@ -1,4 +1,6 @@
-import { EncoderConfig, WorkerData } from ".";
+import { EncoderConfig, TransportConfig, WorkerData } from ".";
+import { MediaPacket } from "../buffer";
+import { Transport } from "../transport";
 import { Decoder } from "./decoder";
 import { Encoder } from "./encoder";
 
@@ -14,6 +16,7 @@ const DefaultConfig: VideoEncoderConfig = {
 class MediaWorker {
     public encoder?: Encoder;
     public decoder?: Decoder;
+    public transport?: Transport;
     private config: VideoEncoderConfig;
     private started: boolean;
     private totalFrames: number;
@@ -24,7 +27,14 @@ class MediaWorker {
         this.started = false;
         this.totalFrames = 0;
         this.keyFramePending = false;
-        self.postMessage({ type: 'log', data: "mediaWorker is initialized..." })
+        self.postMessage({ type: 'log', data: "mediaWorker is initialized" })
+    }
+
+    public async initTransport({ url, fingerprint }: TransportConfig) {
+        this.transport = new Transport(url, fingerprint)
+        await this.transport.init()
+        this.transport.on('packet', this.handleIncomingPackets.bind(this))
+        self.postMessage({ type: 'log', data: 'webtransport initialized' })
     }
 
     public initEncoder({ config, source }: EncoderConfig) {
@@ -51,16 +61,16 @@ class MediaWorker {
         }, 2000)
     }
 
-    public onEncodedChunk(chunk: EncodedVideoChunk) {
+    public async onEncodedChunk(chunk: EncodedVideoChunk) {
         if (!this.started) {
             return
         }
         if (this.keyFramePending && chunk.type !== 'key') {
             return
         }
-        // self.postMessage({ type: 'log', data: 'got encoded chunk, trying to decode...' })
-        this.decoder?.decode(chunk)
-        this.keyFramePending = false
+        const pkt = MediaPacket.toBytes(chunk)
+        await this.transport?.send(pkt)
+        self.postMessage({ type: 'log', data: 'got encoded chunk, sent to server...' })
     }
 
     public async onDecodedFrame(frame: VideoFrame) {
@@ -76,6 +86,18 @@ class MediaWorker {
         chunk.close()
     }
 
+    private handleIncomingPackets(pkt: Uint8Array) {
+        self.postMessage({ type: 'log', data: "got packet from server" })
+        const chunk = MediaPacket.fromBytes(pkt)
+        console.log("decoded chunk data:", chunk, "decoder:", this.decoder, 'codec status:', this.decoder?.codecState);
+        this.keyFramePending = false
+        this.decoder!.decode(chunk)
+        // if (this.totalFrames % 15 === 0) {
+        //     this.keyFramePending = true
+        //     this.encoder?.getKeyFrame()
+        // }
+    }
+
 }
 
 let mediaWorker: MediaWorker | undefined = undefined;
@@ -85,6 +107,12 @@ self.addEventListener('message', ({ data }: { data: WorkerData }) => {
     switch (data.type) {
         case 'init':
             mediaWorker = new MediaWorker()
+            break;
+        case 'init-transport':
+            if (mediaWorker?.transport) {
+                return
+            }
+            mediaWorker?.initTransport(data.data as TransportConfig)
             break;
         case 'init-encoder':
             if (mediaWorker?.encoder) {
