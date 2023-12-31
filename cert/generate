@@ -1,0 +1,54 @@
+#/bin/bash
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# Generate a self-signed certificate for localhost.
+# This is only valid for 10 days so we can use serverCertificateHashes to avoid a CA (bugged).
+# https://developer.mozilla.org/en-US/docs/Web/API/WebTransport/WebTransport#servercertificatehashes
+openssl ecparam -genkey -name prime256v1 -out localhost.key
+openssl req -x509 -sha256 -nodes -days 10 -key localhost.key -out localhost.crt -config localhost.conf -extensions 'v3_req'
+
+# # Generate a hex-encoded (easy to parse) SHA-256 hash of the certificate.
+openssl x509 -in localhost.crt -outform der | openssl dgst -sha256 -binary | xxd -p -c 256 > localhost.hex
+
+
+# Ref - https://github.com/GoogleChrome/samples/blob/gh-pages/webtransport/webtransport_server.py#L40
+# ---- Certificates ----
+#
+# HTTP/3 always operates using TLS, meaning that running a WebTransport over
+# HTTP/3 server requires a valid TLS certificate.  The easiest way to do this
+# is to get a certificate from a real publicly trusted CA like
+# <https://letsencrypt.org/>.
+# https://developers.google.com/web/fundamentals/security/encrypt-in-transit/enable-https
+# contains a detailed explanation of how to achieve that.
+#
+# As an alternative, Chromium can be instructed to trust a self-signed
+# certificate using command-line flags.  Here are step-by-step instructions on
+# how to do that:
+#
+#   1. Generate a certificate and a private key:
+        # openssl req -newkey rsa:2048 -nodes -keyout certificate.key \
+        #         -x509 -out certificate.pem -subj '/CN=Test Certificate' \
+        #         -addext "subjectAltName = DNS:localhost"
+#
+#   2. Compute the fingerprint of the certificate:
+        # openssl x509 -pubkey -noout -in certificate.pem | \
+        #         openssl rsa -pubin -outform der | \
+        #         openssl dgst -sha256 -binary | \
+        #         #   xxd -p -c 256 > localhost.hex
+        #         base64
+#       Ther result will now be now exported as hex
+#      The result should be a base64-encoded blob that looks like this:
+#          "Gi/HIwdiMcPZo2KBjnstF5kQdLI5bPrYJ8i3Vi6Ybck="
+#
+#   3. Pass a flag to Chromium indicating what host and port should be allowed
+#      to use the self-signed certificate.  For instance, if the host is
+#      localhost, and the port is 4433, the flag would be:
+#         --origin-to-force-quic-on=localhost:4433
+#
+#   4. Pass a flag to Chromium indicating which certificate needs to be trusted.
+#      For the example above, that flag would be:
+#         --ignore-certificate-errors-spki-list=Gi/HIwdiMcPZo2KBjnstF5kQdLI5bPrYJ8i3Vi6Ybck=
+#
+# See https://www.chromium.org/developers/how-tos/run-chromium-with-flags for
+# details on how to run Chromium with flags.
