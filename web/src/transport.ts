@@ -1,13 +1,15 @@
 import { EventEmitter } from "events";
 
+export type TransportDirection = 'send' | 'recv';
 export class Transport extends EventEmitter {
   private transport: WebTransport;
-  private mediaStream?: WebTransportBidirectionalStream;
   private pingStream?: WebTransportBidirectionalStream;
-  private pingTimer?: number;
+  private pingTimer?: NodeJS.Timeout;
+  public direction: TransportDirection;
 
-  constructor(url: string, fingerprint: Uint8Array) {
+  constructor(direction: TransportDirection, url: string, fingerprint: Uint8Array) {
     super();
+    this.direction = direction;
     this.transport = new WebTransport(url, {
       serverCertificateHashes: [
         {
@@ -36,48 +38,87 @@ export class Transport extends EventEmitter {
 
   async init() {
     await this.ready;
-    this.connectMediaStream()
-    this.startPingPongLoop()
+
+    if (this.direction === 'recv') {
+      this.handleIncomingMediaPackets()
+    }
+    // this.startPingPongLoop()
   }
 
-  async connectMediaStream() {
-    const stream = await this.transport.createBidirectionalStream();
-    this.mediaStream = stream;
-    this.handleIncomingMediaPackets();
-  }
 
   async send(pkt: Uint8Array) {
-    // if (!this.mediaStream) {
-    //   await this.connectMediaStream()
-    // }
-    const writer =
-      this.mediaStream?.writable.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
-    return this._send(writer, pkt)
+    const stream = await this.transport.createUnidirectionalStream();
+    let chunkSize = 2048 // 4 bytes is for length prefix
+    if (pkt.length > chunkSize) {
+      console.debug("doing chunking of packet");
+      // Send the message in chunks of 1024 bytes
+      for (let i = 0; i < pkt.length; i += chunkSize) {
+        let end = i + chunkSize
+        if (end > pkt.length) {
+          end = pkt.length
+        }
+        const chunk = pkt.slice(i, end)
+        // chunk.set(decimalToBytes(pkt.length), 0)
+        console.debug("sending chunk of size:", chunk.length, "from:", i, "to:", end);
+        const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+        await this._send(writer, chunk)
+      }
+    } else {
+      const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+      await this._send(writer, pkt)
+    }
+    await stream.close()
   }
 
   async _send(writer: WritableStreamDefaultWriter<Uint8Array>, pkt: Uint8Array) {
     await writer.ready;
     console.log("writer is ready to write");
     await writer.write(pkt);
-    console.log("packet written..");
+    // console.log("packet written..");
     await writer.ready;
-    console.log("releasing the writer lock");
+    // console.log("releasing the writer lock");
     writer.releaseLock();
-    console.log("writer lock released..");
+    // console.log("writer lock released..");
   }
 
   async handleIncomingMediaPackets() {
-    const reader = this.mediaStream!.readable.getReader();
+    const reader = this.transport.incomingUnidirectionalStreams.getReader();
     while (true) {
+      // value is readable stream
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
-      console.log("got media packet from server:", value);
-
-      // value is an instance of Uint8Array
-      this.emit("packet", value);
+      this.readFromStream(value)
     }
+  }
+
+  async readFromStream(stream: ReadableStream<Uint8Array>) {
+    const reader = stream.getReader()
+    const value = await this.readAll(reader)
+    console.debug("len of incoming packet:", value.length);
+    reader.releaseLock()
+    if (value.length > 0) {
+      this.emit('packet', value)
+    }
+  }
+
+  async readAll(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Uint8Array> {
+    let buf = new Uint8Array(0)
+    for (; ;) {
+      const { value, done } = await reader.read()
+      if (done) break
+
+      if (buf.byteLength > 0) {
+        const append = new Uint8Array(buf.byteLength + value.byteLength)
+        append.set(buf)
+        append.set(value, buf.byteLength)
+        buf = append
+      } else {
+        buf = value
+      }
+    }
+    return buf
   }
 
   async receiveBidirectional() {

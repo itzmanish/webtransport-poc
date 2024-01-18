@@ -18,6 +18,7 @@ export class Encoder {
         this.source = source
         this.onEncoded = onEncode
         this.readAndEncode()
+        setInterval(this.getKeyFrame, 10_000)
     }
 
     public getKeyFrame() {

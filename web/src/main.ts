@@ -72,7 +72,15 @@ initTransport.addEventListener('click', async () => {
   logger.write('cert hex', fingerprintHex, "cert", fingerprint)
   mediaWorker?.postMessage({
     type: 'init-transport', data: {
-      url: "https://localhost:4443",
+      direction: 'send',
+      url: "https://localhost:4443/publish?stream_id=1",
+      fingerprint: new Uint8Array(fingerprint)
+    }
+  })
+  mediaWorker?.postMessage({
+    type: 'init-transport', data: {
+      direction: 'recv',
+      url: "https://localhost:4443/subscribe?stream_id=1",
       fingerprint: new Uint8Array(fingerprint)
     }
   })

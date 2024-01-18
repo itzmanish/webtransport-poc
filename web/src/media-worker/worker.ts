@@ -1,4 +1,4 @@
-import { EncoderConfig, TransportConfig, WorkerData } from ".";
+import { DecoderConfig, EncoderConfig, TransportConfig, WorkerData } from ".";
 import { MediaPacket } from "../buffer";
 import { Transport } from "../transport";
 import { Decoder } from "./decoder";
@@ -9,14 +9,16 @@ const DefaultConfig: VideoEncoderConfig = {
     codec: 'vp8',
     width: 640,
     height: 480,
-    bitrate: 2_000_000, // 2 Mbps
-    framerate: 60,
+    bitrate: 1_000_000, // 1 Mbps
+    framerate: 30,
+    latencyMode: 'realtime',
 }
 
 class MediaWorker {
     public encoder?: Encoder;
     public decoder?: Decoder;
-    public transport?: Transport;
+    public sendTransport?: Transport;
+    public recvTransport?: Transport;
     private config: VideoEncoderConfig;
     private started: boolean;
     private totalFrames: number;
@@ -30,10 +32,20 @@ class MediaWorker {
         self.postMessage({ type: 'log', data: "mediaWorker is initialized" })
     }
 
-    public async initTransport({ url, fingerprint }: TransportConfig) {
-        this.transport = new Transport(url, fingerprint)
-        await this.transport.init()
-        this.transport.on('packet', this.handleIncomingPackets.bind(this))
+    public async initTransport({ direction, url, fingerprint }: TransportConfig) {
+        if ((direction === 'recv' && this.recvTransport) || (direction === 'send' && this.sendTransport)) {
+            return
+        }
+        console.debug("initializing transport with url:", url, "direction:", direction)
+        const transport = new Transport(direction, url, fingerprint)
+        await transport.init()
+        if (direction === 'recv') {
+            console.debug("adding packet handler listener on recv transport");
+            transport.on('packet', this.handleIncomingPackets.bind(this))
+            this.recvTransport = transport
+        } else {
+            this.sendTransport = transport
+        }
         self.postMessage({ type: 'log', data: 'webtransport initialized' })
     }
 
@@ -68,8 +80,12 @@ class MediaWorker {
         if (this.keyFramePending && chunk.type !== 'key') {
             return
         }
+        if (this.decoder?.codecState === 'closed') {
+            return
+        }
+
         const pkt = MediaPacket.toBytes(chunk)
-        await this.transport?.send(pkt)
+        await this.sendTransport?.send(pkt)
         self.postMessage({ type: 'log', data: 'got encoded chunk, sent to server...' })
     }
 
@@ -88,9 +104,21 @@ class MediaWorker {
 
     private handleIncomingPackets(pkt: Uint8Array) {
         self.postMessage({ type: 'log', data: "got packet from server" })
+        if (this.decoder?.codecState === 'closed') {
+            console.debug('decoder state is closed, not processing packet')
+            return
+        }
         const chunk = MediaPacket.fromBytes(pkt)
-        console.log("decoded chunk data:", chunk, "decoder:", this.decoder, 'codec status:', this.decoder?.codecState);
-        this.keyFramePending = false
+        console.debug("decoded chunk data:", chunk, "decoder:", this.decoder, 'codec status:', this.decoder?.codecState);
+        if (this.keyFramePending) {
+            if (chunk.type !== 'key') {
+                console.warn('discarding packet until key frame is received')
+                this.encoder?.getKeyFrame()
+                return
+            }
+            this.keyFramePending = false
+        }
+
         this.decoder!.decode(chunk)
         // if (this.totalFrames % 15 === 0) {
         //     this.keyFramePending = true
@@ -109,9 +137,6 @@ self.addEventListener('message', ({ data }: { data: WorkerData }) => {
             mediaWorker = new MediaWorker()
             break;
         case 'init-transport':
-            if (mediaWorker?.transport) {
-                return
-            }
             mediaWorker?.initTransport(data.data as TransportConfig)
             break;
         case 'init-encoder':
