@@ -2,14 +2,24 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
+)
+
+type TransportDirection uint
+
+const (
+	Publisher TransportDirection = iota
+	Subscriber
 )
 
 func main() {
@@ -29,23 +39,65 @@ func main() {
 	// create a new webtransport.Server, listening on (UDP) port 443
 	s := webtransport.Server{
 		H3: http3.Server{
-			Addr: *addr,
+			Addr:       *addr,
+			QuicConfig: &quic.Config{},
 		},
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
 	}
 
+	var streams map[string]*Stream = make(map[string]*Stream)
+
 	// Create a new HTTP endpoint /.
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/publish", func(w http.ResponseWriter, r *http.Request) {
 		session, err := s.Upgrade(w, r)
 		if err != nil {
 			log.Printf("upgrading failed: %s", err)
 			w.WriteHeader(500)
 			return
 		}
+		query := r.URL.Query()
+		streamId := query.Get("stream_id")
+		sm, existing := getOrCreateStream(streamId, streams)
+		if existing {
+			fmt.Fprintln(w, "publisher already exists")
+			w.WriteHeader(409)
+			return
+		}
+		wt := NewWebtransport(session, Publisher)
+		pub := NewReceiveStream(wt)
+		pub.onClose(func() {
+			delete(streams, streamId)
+		})
+
+		sm.publish(pub)
+		streams[streamId] = sm
+		go pub.startRecieveLoop()
+		// // Handle the connection. Here goes the application logic.
+		// go handleWebTransport(session, Publisher, streamId)
+	})
+
+	http.HandleFunc("/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		session, err := s.Upgrade(w, r)
+		if err != nil {
+			log.Printf("upgrading failed: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		query := r.URL.Query()
+		streamId := query.Get("stream_id")
+		sm, found := streams[streamId]
+		if !found {
+			log.Printf("publisher stream id not found: %s", streamId)
+			w.WriteHeader(404)
+			return
+		}
+		wt := NewWebtransport(session, Subscriber)
+		sub := NewSendStream(wt)
+		sm.subscribe(sub)
 		// Handle the connection. Here goes the application logic.
-		go handleWebTransport(session)
+		// go handleWebTransport(session, streamId)
 	})
 
 	log.Printf("Webtransport server listening at %s", *addr)
@@ -54,30 +106,34 @@ func main() {
 	}
 }
 
-func handleWebTransport(session *webtransport.Session) {
-	// Handle streams within the session
-	for {
-		stream, err := session.AcceptStream(context.Background())
-		if err != nil {
-			log.Println("Error accepting stream:", err)
-			return
-		}
+func handleWebTransport(session *webtransport.Session, streamId string) {
+	go func() {
+		for {
+			stream, err := session.AcceptStream(context.Background())
+			if err != nil {
+				log.Println("Error accepting stream:", err)
+				return
+			}
 
-		go handleStream(stream)
-	}
+			go handleBidiStream(stream, streamId)
+		}
+	}()
 }
 
-func handleStream(stream webtransport.Stream) {
+func handleBidiStream(stream webtransport.Stream, streamId string) {
 	for {
 		// Handle incoming data on the stream
-		data := make([]byte, 4096)
+		data := make([]byte, 1<<12) // 16384 Bytes, 16KB
 		n, err := stream.Read(data)
 		if err != nil {
-			log.Println("Error reading from stream:", err)
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Printf("Error reading from stream: %+v", err)
 			return
 		}
 
-		log.Println("got packet", data[:n])
+		log.Println("got bidi stream packet len:", n)
 
 		// Echo the data back to the client
 		_, err = stream.Write(data[:n])
@@ -86,4 +142,12 @@ func handleStream(stream webtransport.Stream) {
 			return
 		}
 	}
+}
+
+func getOrCreateStream(id string, streams map[string]*Stream) (*Stream, bool) {
+	stream, found := streams[id]
+	if !found {
+		stream = NewStream(id)
+	}
+	return stream, found
 }

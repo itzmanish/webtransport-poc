@@ -13,6 +13,7 @@ require (
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
 	github.com/marten-seemann/qpack v0.3.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
+	github.com/puzpuzpuz/xsync/v3 v3.0.2
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.4 // indirect
 	go.uber.org/mock v0.3.0 // indirect
