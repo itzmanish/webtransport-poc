@@ -1,3 +1,4 @@
+
 export function isEmpty(obj: Object) {
     return Object.keys(obj).length === 0;
 }
@@ -32,4 +33,8 @@ export function bytesToDecimal(byteArray: number[]) {
     const decimalNumber = dataView.getUint32(0, true);
 
     return decimalNumber;
+}
+
+export async function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
 }

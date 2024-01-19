@@ -1,8 +1,10 @@
 import { EventEmitter } from "events";
+import { decimalToBytes } from "./utils";
 
 export type TransportDirection = 'send' | 'recv';
 export class Transport extends EventEmitter {
   private transport: WebTransport;
+  private mediaStream?: WritableStream<Uint8Array>;
   private pingStream?: WebTransportBidirectionalStream;
   private pingTimer?: NodeJS.Timeout;
   public direction: TransportDirection;
@@ -46,38 +48,46 @@ export class Transport extends EventEmitter {
   }
 
 
-  async send(pkt: Uint8Array) {
-    const stream = await this.transport.createUnidirectionalStream();
-    let chunkSize = 2048 // 4 bytes is for length prefix
-    if (pkt.length > chunkSize) {
+  async send(pkt: Uint8Array, reset: boolean) {
+    if (reset || !this.mediaStream) {
+      console.log("is it being reset?");
+      this.mediaStream?.close()
+      this.mediaStream = await this.transport.createUnidirectionalStream();
+    }
+    const buffer = new Uint8Array(pkt.length + 4)
+    const pktLen = decimalToBytes(pkt.length)
+    buffer.set(pktLen, 0)
+    buffer.set(pkt, 4)
+    console.log("got packet to write, buffer:", buffer, "pkt", pkt, "pktLen:", pktLen);
+    let chunkSize = 2048
+    if (buffer.length > chunkSize) {
+      // if (false) {
       console.debug("doing chunking of packet");
       // Send the message in chunks of 1024 bytes
-      for (let i = 0; i < pkt.length; i += chunkSize) {
+      for (let i = 0; i < buffer.length; i += chunkSize) {
         let end = i + chunkSize
-        if (end > pkt.length) {
-          end = pkt.length
+        if (end > buffer.length) {
+          end = buffer.length
         }
-        const chunk = pkt.slice(i, end)
-        // chunk.set(decimalToBytes(pkt.length), 0)
+        const chunk = buffer.slice(i, end)
         console.debug("sending chunk of size:", chunk.length, "from:", i, "to:", end);
-        const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+        const writer = this.mediaStream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
         await this._send(writer, chunk)
       }
     } else {
-      const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
-      await this._send(writer, pkt)
+      const writer = this.mediaStream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+      await this._send(writer, buffer)
     }
-    await stream.close()
   }
 
   async _send(writer: WritableStreamDefaultWriter<Uint8Array>, pkt: Uint8Array) {
     await writer.ready;
-    console.log("writer is ready to write");
+    // console.log("writer is ready to write");
     await writer.write(pkt);
     // console.log("packet written..");
-    await writer.ready;
+    await writer.ready
     // console.log("releasing the writer lock");
-    writer.releaseLock();
+    writer.releaseLock()
     // console.log("writer lock released..");
   }
 
@@ -96,10 +106,10 @@ export class Transport extends EventEmitter {
   async readFromStream(stream: ReadableStream<Uint8Array>) {
     const reader = stream.getReader()
     const value = await this.readAll(reader)
-    console.debug("len of incoming packet:", value.length);
+    console.debug("len of incoming packet:", value.length, "value:", value);
     reader.releaseLock()
     if (value.length > 0) {
-      this.emit('packet', value)
+      this.emit('packet', value.slice(4))
     }
   }
 
@@ -120,6 +130,25 @@ export class Transport extends EventEmitter {
     }
     return buf
   }
+
+  // ref - https://github.com/kixelated/moq-js/blob/353bb7acc24cc0e38e33ab5dcf36c8a7102f1798/lib/transport/stream.ts#L46-L63
+  async read(reader: ReadableStreamBYOBReader, dst: Uint8Array, offset: number, size: number): Promise<Uint8Array> {
+    while (offset < size) {
+      const empty = new Uint8Array(dst.buffer, dst.byteOffset + offset, size - offset)
+      const { value, done } = await reader.read(empty)
+      if (done) {
+        throw new Error(`short buffer`)
+      }
+
+      dst = new Uint8Array(value.buffer, value.byteOffset - offset)
+      offset += value.byteLength
+    }
+
+    reader.releaseLock()
+
+    return dst
+  }
+
 
   async receiveBidirectional() {
     const reader = this.transport.incomingBidirectionalStreams.getReader();

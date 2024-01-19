@@ -85,7 +85,7 @@ class MediaWorker {
         }
 
         const pkt = MediaPacket.toBytes(chunk)
-        await this.sendTransport?.send(pkt)
+        await this.sendTransport?.send(pkt, chunk.type === 'key')
         self.postMessage({ type: 'log', data: 'got encoded chunk, sent to server...' })
     }
 
