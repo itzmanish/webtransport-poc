@@ -28,7 +28,7 @@ func (s *Stream) subscribe(sub *SendStream) {
 }
 
 func (s *Stream) forward(pkt []byte) {
-	// log.Println("got packet for forwarding, len:", len(pkt))
+	// log.Println("got packet for forwarding, len:", len(pkt), "pkt:", pkt[:4])
 	// serial processing
 	for _, stream := range s.subscribers {
 		_, err := stream.Write(pkt)

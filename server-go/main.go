@@ -68,6 +68,7 @@ func main() {
 		wt := NewWebtransport(session, Publisher)
 		pub := NewReceiveStream(wt)
 		pub.onClose(func() {
+			log.Println("stream closed:", streamId)
 			delete(streams, streamId)
 		})
 
