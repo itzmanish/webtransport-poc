@@ -90,7 +90,6 @@ class MediaWorker {
         const pkt = new MediaPacket(chunk, this.sequencer.get_seq_number())
         await this.sendTransport?.send(pkt.toBytes(), chunk.type === 'key')
         this.metrics.update_send_frame(pkt.seq_num!, pkt.length)
-        self.postMessage({ type: 'log', data: 'got encoded chunk, sent to server...' })
     }
 
     public async onDecodedFrame(frame: VideoFrame) {
@@ -107,7 +106,6 @@ class MediaWorker {
     }
 
     private handleIncomingPackets(pkt: Uint8Array) {
-        self.postMessage({ type: 'log', data: "got packet from server" })
         if (this.decoder?.codecState === 'closed') {
             console.debug('decoder state is closed, not processing packet')
             return

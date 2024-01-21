@@ -78,7 +78,7 @@ acquire.addEventListener('click', async () => {
 // Init transport for connecting webtransport
 initTransport.addEventListener('click', async () => {
   logger.write('connecting webtransport..')
-  logger.write('cert hex', fingerprintHex, "cert", fingerprint)
+  console.debug('cert hex', fingerprintHex, "cert", fingerprint)
   mediaWorker?.postMessage({
     type: 'init-transport', data: {
       direction: 'send',
