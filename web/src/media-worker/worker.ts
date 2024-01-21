@@ -1,5 +1,6 @@
-import { DecoderConfig, EncoderConfig, TransportConfig, WorkerData } from ".";
-import { MediaPacket } from "../buffer";
+import { EncoderConfig, TransportConfig, WorkerData } from ".";
+import { Metrics } from "../metrics";
+import { MediaPacket, Sequencer } from "../packet";
 import { Transport } from "../transport";
 import { Decoder } from "./decoder";
 import { Encoder } from "./encoder";
@@ -19,6 +20,8 @@ class MediaWorker {
     public decoder?: Decoder;
     public sendTransport?: Transport;
     public recvTransport?: Transport;
+    public sequencer: Sequencer;
+    public metrics: Metrics;
     private config: VideoEncoderConfig;
     private started: boolean;
     private totalFrames: number;
@@ -29,6 +32,8 @@ class MediaWorker {
         this.started = false;
         this.totalFrames = 0;
         this.keyFramePending = false;
+        this.sequencer = new Sequencer()
+        this.metrics = new Metrics()
         self.postMessage({ type: 'log', data: "mediaWorker is initialized" })
     }
 
@@ -66,9 +71,7 @@ class MediaWorker {
         this.encoder?.getKeyFrame()
         setInterval(() => {
             self.postMessage({
-                type: 'metrics', data: {
-                    totalFrames: this.totalFrames
-                }
+                type: 'metrics', data: this.metrics.get_stats()
             })
         }, 2000)
     }
@@ -84,8 +87,9 @@ class MediaWorker {
             return
         }
 
-        const pkt = MediaPacket.toBytes(chunk)
-        await this.sendTransport?.send(pkt, chunk.type === 'key')
+        const pkt = new MediaPacket(chunk, this.sequencer.get_seq_number())
+        await this.sendTransport?.send(pkt.toBytes(), chunk.type === 'key')
+        this.metrics.update_send_frame(pkt.seq_num!, pkt.length)
         self.postMessage({ type: 'log', data: 'got encoded chunk, sent to server...' })
     }
 
@@ -108,10 +112,11 @@ class MediaWorker {
             console.debug('decoder state is closed, not processing packet')
             return
         }
-        const chunk = MediaPacket.fromBytes(pkt)
-        console.debug("decoded chunk data:", chunk, "decoder:", this.decoder, 'codec status:', this.decoder?.codecState);
+        const frame = new MediaPacket()
+        frame.fromBytes(pkt)
+        this.metrics.update_recv_frame(frame.seq_num!, frame.length)
         if (this.keyFramePending) {
-            if (chunk.type !== 'key') {
+            if (frame.chunk!.type !== 'key') {
                 console.warn('discarding packet until key frame is received')
                 this.encoder?.getKeyFrame()
                 return
@@ -119,11 +124,7 @@ class MediaWorker {
             this.keyFramePending = false
         }
 
-        this.decoder!.decode(chunk)
-        // if (this.totalFrames % 15 === 0) {
-        //     this.keyFramePending = true
-        //     this.encoder?.getKeyFrame()
-        // }
+        this.decoder!.decode(frame.chunk!)
     }
 
 }

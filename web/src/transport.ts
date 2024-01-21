@@ -50,7 +50,6 @@ export class Transport extends EventEmitter {
 
   async send(pkt: Uint8Array, reset: boolean) {
     if (reset || !this.mediaStream) {
-      console.log("is it being reset?");
       this.mediaStream?.close()
       this.mediaStream = await this.transport.createUnidirectionalStream();
     }
@@ -58,11 +57,9 @@ export class Transport extends EventEmitter {
     const pktLen = decimalToBytes(pkt.length)
     buffer.set(pktLen, 0)
     buffer.set(pkt, 4)
-    console.log("got packet to write, buffer:", buffer, "pkt", pkt, "pktLen:", pktLen);
+    // console.log("got packet to write, buffer:", buffer, "pkt", pkt, "pktLen:", pktLen);
     let chunkSize = 2048
     if (buffer.length > chunkSize) {
-      // if (false) {
-      console.debug("doing chunking of packet");
       // Send the message in chunks of 1024 bytes
       for (let i = 0; i < buffer.length; i += chunkSize) {
         let end = i + chunkSize
@@ -106,7 +103,7 @@ export class Transport extends EventEmitter {
   async readFromStream(stream: ReadableStream<Uint8Array>) {
     const reader = stream.getReader()
     const value = await this.readAll(reader)
-    console.debug("len of incoming packet:", value.length, "value:", value);
+    // console.debug("len of incoming packet:", value.length, "value:", value);
     reader.releaseLock()
     if (value.length > 0) {
       this.emit('packet', value.slice(4))

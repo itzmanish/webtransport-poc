@@ -6,6 +6,7 @@ import "./style.css"
 import { Transport } from "./transport";
 import { WorkerData } from "./media-worker"
 import MediaWorker from "./media-worker/worker?worker";
+import { StatsReport } from './metrics';
 
 var acquire = document.querySelector<HTMLButtonElement>(".acquire")!
 var initTransport = document.querySelector<HTMLButtonElement>(".init-transport")!
@@ -40,8 +41,16 @@ document.addEventListener('DOMContentLoaded', () => {
         logger.write(data.data)
         break;
       case 'metrics':
-        const { totalFrames } = data.data as any
-        framesCount.innerText = "total frames processed: " + totalFrames
+        const report = data.data as StatsReport
+        framesCount.innerText = `
+        Sent Frames: ${report.sent_frames}
+        Sent Bytes: ${report.sent_bytes} Bytes
+        Received Frames: ${report.recv_frames}
+        Received Bytes: ${report.recv_bytes} Bytes
+        Last sent at: ${report.last_sent_at}
+        Last received at: ${report.last_recv_at ?? "not yet"}
+        RTT: ${report.rtt} ms
+        `
         break
       case 'media':
         buffer.push(data.data as VideoFrame)
