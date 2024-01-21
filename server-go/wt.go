@@ -25,7 +25,7 @@ func NewWebtransport(session *webtransport.Session, direction TransportDirection
 		direction: direction,
 		buffer:    atomic.Value{},
 	}
-	wt.buffer.Store(make([]byte, 1<<16))
+	wt.buffer.Store(make([]byte, 1<<18))
 	return wt
 }
 
