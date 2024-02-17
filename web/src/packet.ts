@@ -67,7 +67,7 @@ export class MediaPacket {
         // Extract binary data from the buffer
         const payload = msg.slice(13);
 
-        console.log('seq_num', seq_num, "timestamp:", timestamp, 'duration:', duration, 'type:', type);
+        // console.log('seq_num', seq_num, "timestamp:", timestamp, 'duration:', duration, 'type:', type);
 
         this.seq_num = seq_num
         this.chunk = new EncodedVideoChunk({
@@ -94,4 +94,22 @@ export class Sequencer {
     get last_seq_number() {
         return this.seq_number
     }
+}
+
+export class Packetizer {
+    sequencer: Sequencer
+    buffer: TransformStream<EncodedVideoChunk, { keyframe: boolean, data: Uint8Array }>
+
+    constructor() {
+        this.sequencer = new Sequencer()
+        this.buffer = new TransformStream({
+            transform: this.#transform.bind(this)
+        })
+    }
+
+    #transform(chunk: EncodedVideoChunk, controller: TransformStreamDefaultController<{ keyframe: boolean, data: Uint8Array }>) {
+        const pkt = new MediaPacket(chunk, this.sequencer.get_seq_number())
+        controller.enqueue({ keyframe: pkt.chunk?.type === 'key', data: pkt.toBytes() })
+    }
+
 }
