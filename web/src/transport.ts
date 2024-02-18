@@ -1,16 +1,15 @@
-import { EventEmitter } from "events";
 import { decimalToBytes } from "./utils";
 
 export type TransportDirection = 'send' | 'recv';
-export class Transport extends EventEmitter {
+export class Transport {
   private transport: WebTransport;
   private mediaStream?: WritableStream<Uint8Array>;
   private pingStream?: WebTransportBidirectionalStream;
   private pingTimer?: NodeJS.Timeout;
   public direction: TransportDirection;
+  public readable: ReadableStream<Uint8Array>
 
   constructor(direction: TransportDirection, url: string, fingerprint: Uint8Array) {
-    super();
     this.direction = direction;
     this.transport = new WebTransport(url, {
       serverCertificateHashes: [
@@ -24,7 +23,12 @@ export class Transport extends EventEmitter {
       console.log(`The HTTP/3 connection to ${url} closed gracefully.`);
     }).catch((e) => {
       console.error("error on closing:", e)
-    }).finally(this.close)
+    }).finally(this.close.bind(this))
+
+    this.readable = new ReadableStream({
+      start: this.start.bind(this),
+      cancel: this.cancel.bind(this),
+    })
   }
 
   get ready() {
@@ -40,11 +44,6 @@ export class Transport extends EventEmitter {
 
   async init() {
     await this.ready;
-
-    if (this.direction === 'recv') {
-      this.handleIncomingMediaPackets()
-    }
-    // this.startPingPongLoop()
   }
 
 
@@ -67,7 +66,7 @@ export class Transport extends EventEmitter {
           end = buffer.length
         }
         const chunk = buffer.slice(i, end)
-        console.debug("sending chunk of size:", chunk.length, "from:", i, "to:", end);
+        // console.debug("sending chunk of size:", chunk.length, "from:", i, "to:", end);
         const writer = this.mediaStream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
         await this._send(writer, chunk)
       }
@@ -88,25 +87,25 @@ export class Transport extends EventEmitter {
     // console.log("writer lock released..");
   }
 
-  async handleIncomingMediaPackets() {
-    const reader = this.transport.incomingUnidirectionalStreams.getReader();
-    while (true) {
-      // value is readable stream
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      this.readFromStream(value)
-    }
-  }
+  // async handleIncomingMediaPackets() {
+  //   const reader = this.transport.incomingUnidirectionalStreams.getReader();
+  //   while (true) {
+  //     // value is readable stream
+  //     const { done, value } = await reader.read();
+  //     if (done) {
+  //       break;
+  //     }
+  //     this.readFromStream(value)
+  //   }
+  // }
 
-  async readFromStream(stream: ReadableStream<Uint8Array>) {
+  async readFromStream(stream: ReadableStream<Uint8Array>, controller: ReadableStreamDefaultController<Uint8Array>) {
     const reader = stream.getReader()
     const value = await this.readAll(reader)
     // console.debug("len of incoming packet:", value.length, "value:", value);
     reader.releaseLock()
     if (value.length > 0) {
-      this.emit('packet', value.slice(4))
+      controller.enqueue(value.slice(4))
     }
   }
 
@@ -161,6 +160,25 @@ export class Transport extends EventEmitter {
     }
   }
 
+  async start(controller: ReadableStreamDefaultController<Uint8Array>) {
+    if (this.direction !== 'recv') {
+      return
+    }
+    console.log("starting reading incoming streams", this, this.transport);
+    const reader = this.transport.incomingUnidirectionalStreams.getReader();
+    while (true) {
+      // value is readable stream
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      this.readFromStream(value, controller)
+    }
+  }
+
+  cancel(reason?: any): void {
+    this.transport.close({ reason })
+  }
 
   // Ping Pong handlers
   private async startPingPongLoop() {

@@ -8,7 +8,8 @@ import { WorkerData } from "./media-worker"
 // import MediaWorker from "./media-worker/worker?worker";
 import { StatsReport } from './metrics';
 import { MediaHandler } from './gum';
-import { VideoStream } from './stream';
+import { VideoSendStream } from './streams/send_stream';
+import { VideoRecvStream } from './streams/recv_stream';
 
 var acquire = document.querySelector<HTMLButtonElement>(".acquire")!
 var initTransport = document.querySelector<HTMLButtonElement>(".init-transport")!
@@ -26,8 +27,8 @@ for (let c = 0; c < fingerprintHex.length - 1; c += 2) {
 var outputTrack: WritableStream<VideoFrame>;
 // var mediaWorker: Worker | undefined;
 var buffer: VideoFrame[] = [];
-var transport: Transport;
-var stream: VideoStream;
+var transport: Transport[] = [];
+var videoSendStream: VideoSendStream;
 
 const logger = new Logger(output)
 const mediaHandler = new MediaHandler()
@@ -95,8 +96,8 @@ initTransport.addEventListener('click', async () => {
   //     fingerprint: new Uint8Array(fingerprint)
   //   }
   // })
-  transport = new Transport('send', "https://localhost:4443/publish?stream_id=1", new Uint8Array(fingerprint))
-  await transport.init()
+  transport[0] = new Transport('send', "https://localhost:4443/publish?stream_id=1", new Uint8Array(fingerprint))
+  await transport[0].init()
   logger.write('webtransport connected...')
 })
 
@@ -105,22 +106,30 @@ initEncoder.addEventListener('click', async () => {
   logger.write("starting encoding...")
   // const sink = new MediaStreamTrackProcessor({ track: mediaHandler.video! })
   // mediaWorker?.postMessage({ type: 'init-encoder', data: { source: sink.readable } }, [sink.readable])
-  stream = new VideoStream(mediaHandler.video!, transport)
+  videoSendStream = new VideoSendStream(mediaHandler.video!, transport[0])
   logger.write("encoding in progress...")
-  await stream.start()
+  await videoSendStream.start()
   logger.write('encoding stopped')
 })
 
 // init decoder for decoding
-initDecoder.addEventListener('click', () => {
+initDecoder.addEventListener('click', async () => {
   logger.write('starting decoding...')
-  const generator = new MediaStreamTrackGenerator({ kind: 'video' })
-  outputTrack = generator.writable
+  transport[1] = new Transport('recv', "https://localhost:4443/subscribe?stream_id=1", new Uint8Array(fingerprint))
+  await transport[1].init()
+
+  const recvStream = new VideoRecvStream(
+    videoSendStream.ssrc,
+    videoSendStream.encoder.decoderConfig!,
+    transport[1],
+  )
+  const generator = recvStream.track.track;
   appendVideo('.remote', new MediaStream([generator as any]))
+  videoSendStream.encoder.get_keyframe()
   // mediaWorker?.postMessage({
   //   type: 'init-decoder',
   // })
-  startTrackWriterWorker()
+  // startTrackWriterWorker()
 })
 
 const startTrackWriterWorker = async () => {

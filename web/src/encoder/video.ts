@@ -1,7 +1,7 @@
 
 export class Encoder extends TransformStream<VideoFrame, EncodedVideoChunk> {
     private encoderConfig: VideoEncoderConfig;
-    private decoderConfig?: VideoDecoderConfig;
+    decoderConfig?: VideoDecoderConfig;
     private encoder!: VideoEncoder;
 
     public keyframe: boolean;

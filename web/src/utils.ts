@@ -38,3 +38,14 @@ export function bytesToDecimal(byteArray: number[]) {
 export async function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+export function generateSsrc() {
+    return generateRandomNumberInRange(Math.pow(2, 16), (Math.pow(2, 32) - 1))
+}
+
+function generateRandomNumberInRange(min: number, max: number) {
+    // Calculate the range
+    const range = max - min + 1;
+    // Generate a random number within the range
+    return Math.floor(Math.random() * range) + min;
+}

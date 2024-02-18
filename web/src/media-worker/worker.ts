@@ -2,8 +2,8 @@ import { EncoderConfig, TransportConfig, WorkerData } from ".";
 import { Metrics } from "../metrics";
 import { MediaPacket, Sequencer } from "../packet";
 import { Transport } from "../transport";
-import { Decoder } from "./decoder";
-import { Encoder } from "./encoder";
+import { Decoder as VideoDecoder } from "../decoder/video";
+import { Encoder as VideoEncoder } from "../encoder/video";
 
 
 const DefaultConfig: VideoEncoderConfig = {
@@ -16,8 +16,8 @@ const DefaultConfig: VideoEncoderConfig = {
 }
 
 class MediaWorker {
-    public encoder?: Encoder;
-    public decoder?: Decoder;
+    public encoder?: VideoEncoder;
+    public decoder?: VideoDecoder;
     public sendTransport?: Transport;
     public recvTransport?: Transport;
     public sequencer: Sequencer;
@@ -55,20 +55,20 @@ class MediaWorker {
     }
 
     public initEncoder({ config, source }: EncoderConfig) {
-        this.encoder = new Encoder(config ?? this.config, source, this.onEncodedChunk.bind(this));
+        this.encoder = new VideoEncoder(config ?? this.config)
         self.postMessage({ type: 'log', data: "encoder created and inited" })
     }
 
     public initDecoder() {
-        this.decoder = new Decoder({
+        this.decoder = new VideoDecoder({
             codec: this.config.codec,
             codedHeight: this.config.height,
             codedWidth: this.config.width,
-        }, this.onDecodedFrame.bind(this))
+        })
         self.postMessage({ type: 'log', data: "decoder created and inited" })
         this.started = true;
         this.keyFramePending = true;
-        this.encoder?.getKeyFrame()
+        this.encoder?.get_keyframe()
         setInterval(() => {
             self.postMessage({
                 type: 'metrics', data: this.metrics.get_stats()
@@ -99,12 +99,6 @@ class MediaWorker {
         frame.close()
     }
 
-    public encode(chunk: VideoFrame) {
-        // self.postMessage({ type: 'log', data: 'got video frame for encoding...' })
-        this.encoder?.encode(chunk)
-        chunk.close()
-    }
-
     private handleIncomingPackets(pkt: Uint8Array) {
         if (this.decoder?.codecState === 'closed') {
             console.debug('decoder state is closed, not processing packet')
@@ -116,13 +110,13 @@ class MediaWorker {
         if (this.keyFramePending) {
             if (frame.chunk!.type !== 'key') {
                 console.warn('discarding packet until key frame is received')
-                this.encoder?.getKeyFrame()
+                this.encoder?.get_keyframe()
                 return
             }
             this.keyFramePending = false
         }
 
-        this.decoder!.decode(frame.chunk!)
+        // this.decoder!.decode(frame.chunk!)
     }
 
 }
@@ -151,7 +145,7 @@ self.addEventListener('message', ({ data }: { data: WorkerData }) => {
             mediaWorker?.initDecoder()
             break
         case 'media':
-            mediaWorker?.encode(data.data as VideoFrame)
+            // mediaWorker?.encode(data.data as VideoFrame)
             break
         default:
             break;

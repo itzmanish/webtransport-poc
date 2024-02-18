@@ -1,6 +1,7 @@
-import { Packetizer, Sequencer } from "./packet"
-import { Encoder as VideoEncoder } from "./encoder/video"
-import { Transport } from "./transport"
+import { Packetizer } from "../packet"
+import { Encoder as VideoEncoder } from "../encoder/video"
+import { Transport } from "../transport"
+import { generateSsrc } from "../utils"
 
 const DefaultVideoEncoderConfig: VideoEncoderConfig = {
     codec: 'vp8',
@@ -11,7 +12,8 @@ const DefaultVideoEncoderConfig: VideoEncoderConfig = {
     latencyMode: 'realtime',
 }
 
-export class VideoStream extends ReadableStream<Uint8Array> {
+export class VideoSendStream {
+    ssrc: number
     track: MediaStreamVideoTrack
     trackProcessor: MediaStreamTrackProcessor<VideoFrame>
     encoder: VideoEncoder
@@ -21,11 +23,11 @@ export class VideoStream extends ReadableStream<Uint8Array> {
     #sink: WritableStream<{ keyframe: boolean, data: Uint8Array }>
 
     constructor(track: MediaStreamVideoTrack, transport: Transport) {
-        super()
+        this.ssrc = generateSsrc()
         this.track = track
         this.trackProcessor = new MediaStreamTrackProcessor({ track })
         this.encoder = new VideoEncoder(DefaultVideoEncoderConfig)
-        this.packetizer = new Packetizer()
+        this.packetizer = new Packetizer(this.ssrc)
         this.#sink = new WritableStream({
             write: this.#write.bind(this)
         })
@@ -40,11 +42,9 @@ export class VideoStream extends ReadableStream<Uint8Array> {
     }
 
     #write(chunk: { keyframe: boolean, data: Uint8Array }) {
-        console.log("got packet to send,pkt:", chunk);
+        // console.log("got packet to send for ssrc:%d, pkt:%o", this.ssrc, chunk);
         this.transport.send(chunk.data, chunk.keyframe).catch((e) => {
             console.error("failed to send packets over webtransport, error:", e.message);
-            this.cancel("failed to send packet")
         })
     }
-
 }
