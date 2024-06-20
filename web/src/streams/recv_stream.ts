@@ -1,43 +1,71 @@
 import { DePacketizer, MediaPacket, Packetizer } from "../packet"
 import { Decoder as VideoDecoder } from "../decoder/video"
+import { Decoder as AudioDecoder } from "../decoder/audio"
 import { Transport } from "../transport"
-import { VideoTrack } from "../track"
+import { AudioTrack, VideoTrack } from "../track"
 
-const DefaultVideoEncoderConfig: VideoEncoderConfig = {
-    codec: 'vp8',
-    width: 640,
-    height: 480,
-    bitrate: 1_000_000, // 1 Mbps
-    framerate: 30,
-    latencyMode: 'realtime',
-}
 
 export class VideoRecvStream {
     ssrc: number
     track: VideoTrack
     decoder: VideoDecoder
-    dePacketizer: DePacketizer
+    dePacketizer: DePacketizer<EncodedVideoChunk>
     transport: Transport
 
-    buffer: TransformStream<MediaPacket, EncodedVideoChunk>
+    buffer: TransformStream<MediaPacket<EncodedVideoChunk>, EncodedVideoChunk>
 
     constructor(ssrc: number, config: VideoDecoderConfig, transport: Transport) {
         this.ssrc = ssrc
-        this.track = new VideoTrack("random")
+        this.track = new VideoTrack(`video_${ssrc}`)
         this.decoder = new VideoDecoder(config)
         this.dePacketizer = new DePacketizer(this.ssrc)
         this.buffer = new TransformStream({
             transform: this.#transform.bind(this),
         })
         this.transport = transport
-        this.transport.readable
+        this.transport.videoReadable
             .pipeThrough(this.dePacketizer.buffer)
             .pipeThrough(this.buffer)
             .pipeThrough(this.decoder.frames)
             .pipeTo(this.track.writable)
     }
 
-    #transform(chunk: MediaPacket, controller: TransformStreamDefaultController<EncodedVideoChunk>) {
+    #transform(chunk: MediaPacket<EncodedVideoChunk>, controller: TransformStreamDefaultController<EncodedVideoChunk>) {
+        if (chunk.ssrc !== this.ssrc) {
+            return
+        }
+        if (chunk.chunk) controller.enqueue(chunk.chunk)
+    }
+
+
+}
+
+export class AudioRecvStream {
+    ssrc: number
+    track: AudioTrack
+    decoder: AudioDecoder
+    dePacketizer: DePacketizer<EncodedAudioChunk>
+    transport: Transport
+
+    buffer: TransformStream<MediaPacket<EncodedAudioChunk>, EncodedAudioChunk>
+
+    constructor(ssrc: number, config: AudioDecoderConfig, transport: Transport) {
+        this.ssrc = ssrc
+        this.track = new AudioTrack(`audio_${ssrc}`)
+        this.decoder = new AudioDecoder(config)
+        this.dePacketizer = new DePacketizer(this.ssrc)
+        this.buffer = new TransformStream({
+            transform: this.#transform.bind(this),
+        })
+        this.transport = transport
+        this.transport.audioReadable
+            .pipeThrough(this.dePacketizer.buffer)
+            .pipeThrough(this.buffer)
+            .pipeThrough(this.decoder.frames)
+            .pipeTo(this.track.writable)
+    }
+
+    #transform(chunk: MediaPacket<EncodedAudioChunk>, controller: TransformStreamDefaultController<EncodedVideoChunk>) {
         if (chunk.ssrc !== this.ssrc) {
             return
         }

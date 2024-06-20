@@ -2,7 +2,7 @@ import { MediaKind } from "./types"
 
 export class AudioTrack extends WritableStream<AudioData> {
     id: string
-    #track: MediaStreamTrackGenerator<AudioData>
+    track: MediaStreamTrackGenerator<AudioData>
     kind: MediaKind
     metadata: Record<string, string>
 
@@ -10,25 +10,37 @@ export class AudioTrack extends WritableStream<AudioData> {
         super()
         this.id = id;
         this.kind = 'audio';
-        this.#track = new MediaStreamTrackGenerator({ kind: 'audio' });
+        this.track = new MediaStreamTrackGenerator({ kind: 'audio' })
+
         this.metadata = {};
     }
 
-    get track() {
-        const writable = this.#track.writable
-        return writable
+    get writable() {
+        return this.track.writable
     }
 
-    write(chunk: AudioData) {
-        return this.#track.writable.getWriter().write(chunk)
+    getWriter(): WritableStreamDefaultWriter<AudioData> {
+        return this.track.writable.getWriter()
+    }
+
+    async write(data: AudioData): Promise<void> {
+        console.log("writing in audio track")
+        const writer = this.track.writable.getWriter()
+        await writer.ready
+        await writer.write(data)
+        data?.close()
+        await writer.ready
+        writer.releaseLock()
     }
 
     close(): Promise<void> {
-        return this.#track.writable.close()
+        // do something here
+        return Promise.resolve()
     }
 
     abort(reason?: any): Promise<void> {
-        return this.#track.writable.abort(reason)
+        // do something here
+        return Promise.resolve()
     }
 }
 
@@ -54,6 +66,8 @@ export class VideoTrack {
     }
 
     async write(chunk: VideoFrame, controller: WritableStreamDefaultController) {
+        // is this happening in real?
+        console.log("writing in video track")
         const writer = this.track.writable.getWriter()
         await writer.ready
         await writer.write(chunk)

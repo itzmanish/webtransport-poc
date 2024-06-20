@@ -3,6 +3,7 @@ export class Encoder extends TransformStream {
     private encoderConfig: AudioEncoderConfig;
     private decoderConfig?: AudioDecoderConfig;
     private encoder!: AudioEncoder;
+    #syncCount: number = 0;
 
     public frames: TransformStream<AudioData, EncodedAudioChunk | AudioDecoderConfig>
 
@@ -12,6 +13,10 @@ export class Encoder extends TransformStream {
 
     get config() {
         return this.encoderConfig
+    }
+
+    get syncCount() {
+        return this.#syncCount
     }
 
     constructor(config: AudioEncoderConfig) {
@@ -47,12 +52,15 @@ export class Encoder extends TransformStream {
 
     private enqueue(controller: TransformStreamDefaultController<EncodedAudioChunk | AudioDecoderConfig>, frame: EncodedAudioChunk, metadata?: EncodedAudioChunkMetadata) {
         if (!this.decoderConfig) {
+            console.log(metadata, frame);
             const config = metadata?.decoderConfig
             if (!config) {
                 throw new Error('missing decoder config')
             }
-            controller.enqueue(config)
             this.decoderConfig = config
+        }
+        if (frame.type === 'key') {
+            this.#syncCount += 1
         }
 
         controller.enqueue(frame)

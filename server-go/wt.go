@@ -13,19 +13,21 @@ import (
 )
 
 type Webtransport struct {
-	direction TransportDirection
-	session   *webtransport.Session
-	sink      chan []byte
-	buffer    atomic.Value
+	direction  TransportDirection
+	session    *webtransport.Session
+	sink       chan []byte
+	buffer     atomic.Value
+	bufferSize int
 }
 
 func NewWebtransport(session *webtransport.Session, direction TransportDirection) *Webtransport {
 	wt := &Webtransport{
-		session:   session,
-		direction: direction,
-		buffer:    atomic.Value{},
+		session:    session,
+		direction:  direction,
+		buffer:     atomic.Value{},
+		bufferSize: 1 << 20,
 	}
-	wt.buffer.Store(make([]byte, 1<<18))
+	wt.buffer.Store(make([]byte, wt.bufferSize))
 	return wt
 }
 
@@ -93,7 +95,7 @@ func (wt *Webtransport) handleRecvStream(stream webtransport.ReceiveStream) {
 	for {
 		// Handle incoming data on the stream
 		data := make([]byte, 1<<12) // 1<<14 = 16384 Bytes, 16KB
-		// data := []byte{}
+		// data := make([]byte, 1500)
 
 		n, err := stream.Read(data)
 		if err != nil {
@@ -108,7 +110,7 @@ func (wt *Webtransport) handleRecvStream(stream webtransport.ReceiveStream) {
 			log.Printf("Error reading from stream: %+v", err)
 			return
 		}
-		if len(data) <= 0 {
+		if len(data) == 0 {
 			log.Println("why the f*** the data size is 0?")
 			continue
 		}
@@ -117,7 +119,8 @@ func (wt *Webtransport) handleRecvStream(stream webtransport.ReceiveStream) {
 }
 
 func (wt *Webtransport) flush(length int) {
-	old := wt.buffer.Swap(make([]byte, 1<<16)).([]byte)
+	// NOTE(itzmanish): use pool or two []byte array which will keep swapping on flush.
+	old := wt.buffer.Swap(make([]byte, wt.bufferSize)).([]byte)
 	wt.sink <- old[:length]
 }
 

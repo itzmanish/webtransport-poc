@@ -1,15 +1,21 @@
+import { Metrics } from "./metrics";
+import { MediaPacket } from "./packet";
 import { decimalToBytes } from "./utils";
 
 export type TransportDirection = 'send' | 'recv';
 export class Transport {
   private transport: WebTransport;
-  private mediaStream?: WritableStream<Uint8Array>;
+  private videoStream?: WritableStream<Uint8Array>;
+  private audioStream?: WritableStream<Uint8Array>;
   private pingStream?: WebTransportBidirectionalStream;
   private pingTimer?: NodeJS.Timeout;
+  private readable: ReadableStream<Uint8Array>
+  public audioReadable: ReadableStream<Uint8Array>
+  public videoReadable: ReadableStream<Uint8Array>
   public direction: TransportDirection;
-  public readable: ReadableStream<Uint8Array>
+  public metrics: Metrics;
 
-  constructor(direction: TransportDirection, url: string, fingerprint: Uint8Array) {
+  constructor(direction: TransportDirection, url: string, fingerprint: Uint8Array, metrics: Metrics) {
     this.direction = direction;
     this.transport = new WebTransport(url, {
       serverCertificateHashes: [
@@ -25,10 +31,14 @@ export class Transport {
       console.error("error on closing:", e)
     }).finally(this.close.bind(this))
 
+    this.metrics = metrics;
     this.readable = new ReadableStream({
       start: this.start.bind(this),
       cancel: this.cancel.bind(this),
     })
+    const [ar, vr] = this.readable.tee();
+    this.audioReadable = ar
+    this.videoReadable = vr
   }
 
   get ready() {
@@ -48,16 +58,33 @@ export class Transport {
 
 
   async send(pkt: Uint8Array, reset: boolean) {
-    if (reset || !this.mediaStream) {
-      this.mediaStream?.close()
-      this.mediaStream = await this.transport.createUnidirectionalStream();
+    let stream: WritableStream<Uint8Array> | undefined = undefined;
+    if (pkt.at(0) === 1) {
+      if (reset || !this.videoStream) {
+        await this.videoStream?.close().catch(e => {
+          console.error("failed to close videostream", e);
+        })
+        this.videoStream = await this.transport.createUnidirectionalStream();
+      }
+      stream = this.videoStream
+    } else {
+      if (reset || !this.audioStream) {
+        await this.audioStream?.close().catch(e => {
+          console.error("failed to close audio stream", e)
+        })
+        this.audioStream = await this.transport.createUnidirectionalStream()
+      }
+      stream = this.audioStream
+    }
+    if (!stream) {
+      throw new Error("packet format is wrong or not able to get a stream")
     }
     const buffer = new Uint8Array(pkt.length + 4)
     const pktLen = decimalToBytes(pkt.length)
     buffer.set(pktLen, 0)
     buffer.set(pkt, 4)
     // console.log("got packet to write, buffer:", buffer, "pkt", pkt, "pktLen:", pktLen);
-    let chunkSize = 2048
+    let chunkSize = 60000
     if (buffer.length > chunkSize) {
       // Send the message in chunks of 1024 bytes
       for (let i = 0; i < buffer.length; i += chunkSize) {
@@ -67,13 +94,15 @@ export class Transport {
         }
         const chunk = buffer.slice(i, end)
         // console.debug("sending chunk of size:", chunk.length, "from:", i, "to:", end);
-        const writer = this.mediaStream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+        const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
         await this._send(writer, chunk)
       }
     } else {
-      const writer = this.mediaStream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
+      const writer = stream.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
       await this._send(writer, buffer)
     }
+    const ssrc = MediaPacket.getSSRC(pkt)
+    this.metrics.update_send_frame(ssrc, pkt.length)
   }
 
   async _send(writer: WritableStreamDefaultWriter<Uint8Array>, pkt: Uint8Array) {
@@ -105,7 +134,10 @@ export class Transport {
     // console.debug("len of incoming packet:", value.length, "value:", value);
     reader.releaseLock()
     if (value.length > 0) {
-      controller.enqueue(value.slice(4))
+      const payload = value.slice(4)
+      const ssrc = MediaPacket.getSSRC(payload)
+      this.metrics.update_recv_frame(ssrc, payload.length)
+      controller.enqueue(payload)
     }
   }
 
@@ -212,3 +244,4 @@ export class Transport {
     }
   }
 }
+

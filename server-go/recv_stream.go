@@ -21,5 +21,7 @@ func (rs *ReceiveStream) onClose(cb func()) {
 
 func (rs *ReceiveStream) startRecieveLoop() {
 	rs.wt.handleRecv()
-	rs.onclose()
+	if rs.onclose != nil {
+		rs.onclose()
+	}
 }

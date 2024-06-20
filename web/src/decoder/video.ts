@@ -27,7 +27,10 @@ export class Decoder {
             },
             error: this.onError.bind(this)
         })
+        console.log("started decoding process", this.config, this.codecState)
         this.decoder.configure(this.config)
+        console.log("codec state", this.codecState);
+
     }
 
     private transform(chunk: EncodedVideoChunk) {
@@ -35,8 +38,7 @@ export class Decoder {
             return
         }
         if (chunk.type === 'key') this.keyFramePending = false
-        const decoder = this.decoder
-        decoder.decode(chunk)
+        this.decoder.decode(chunk)
     }
 
     private flush() {
@@ -48,6 +50,7 @@ export class Decoder {
     }
 
     private onError(error: Error) {
+        console.error("failed to decode:", error)
         throw error;
     }
 

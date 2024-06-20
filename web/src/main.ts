@@ -4,12 +4,11 @@ import fingerprintHex from '../../cert/localhost.hex?raw';
 import { Logger } from "./logger";
 import "./style.css"
 import { Transport } from "./transport";
-import { WorkerData } from "./media-worker"
 // import MediaWorker from "./media-worker/worker?worker";
-import { StatsReport } from './metrics';
+import { Metrics, StatsReport } from './metrics';
 import { MediaHandler } from './gum';
-import { VideoSendStream } from './streams/send_stream';
-import { VideoRecvStream } from './streams/recv_stream';
+import { AudioSendStream, VideoSendStream } from './streams/send_stream';
+import { AudioRecvStream, VideoRecvStream } from './streams/recv_stream';
 
 var acquire = document.querySelector<HTMLButtonElement>(".acquire")!
 var initTransport = document.querySelector<HTMLButtonElement>(".init-transport")!
@@ -29,9 +28,12 @@ var outputTrack: WritableStream<VideoFrame>;
 var buffer: VideoFrame[] = [];
 var transport: Transport[] = [];
 var videoSendStream: VideoSendStream;
+var audioSendStream: AudioSendStream;
 
 const logger = new Logger(output)
-const mediaHandler = new MediaHandler()
+const videoMediaHandler = new MediaHandler()
+const audioMediaHandler = new MediaHandler()
+const globalMetrics = new Metrics()
 
 // setup web workers
 // document.addEventListener('DOMContentLoaded', () => {
@@ -73,9 +75,12 @@ const mediaHandler = new MediaHandler()
 // acquire media track
 acquire.addEventListener('click', async () => {
   logger.write("acquiring video track...")
-  await mediaHandler.acquireVideo()
-  appendVideo(".local", mediaHandler.stream)
-  logger.write("media stream acquired. stream id:", mediaHandler.stream.id)
+  await videoMediaHandler.acquireVideo()
+  appendVideo(".local", videoMediaHandler.stream)
+  logger.write("media stream acquired. video stream id:", videoMediaHandler.stream.id)
+  // logger.write("acquiring audio track...")
+  // await audioMediaHandler.acquireAudio()
+  // logger.write("media stream acquired. audio stream id:", audioMediaHandler.stream.id)
 })
 
 // Init transport for connecting webtransport
@@ -96,7 +101,7 @@ initTransport.addEventListener('click', async () => {
   //     fingerprint: new Uint8Array(fingerprint)
   //   }
   // })
-  transport[0] = new Transport('send', "https://localhost:4443/publish?stream_id=1", new Uint8Array(fingerprint))
+  transport[0] = new Transport('send', "https://localhost:4443/publish?stream_id=1", new Uint8Array(fingerprint), globalMetrics)
   await transport[0].init()
   logger.write('webtransport connected...')
 })
@@ -106,26 +111,46 @@ initEncoder.addEventListener('click', async () => {
   logger.write("starting encoding...")
   // const sink = new MediaStreamTrackProcessor({ track: mediaHandler.video! })
   // mediaWorker?.postMessage({ type: 'init-encoder', data: { source: sink.readable } }, [sink.readable])
-  videoSendStream = new VideoSendStream(mediaHandler.video!, transport[0])
+  videoSendStream = new VideoSendStream(videoMediaHandler.video!, transport[0])
+  // audioSendStream = new AudioSendStream(audioMediaHandler.audio!, transport[0])
   logger.write("encoding in progress...")
   await videoSendStream.start()
+  // await audioSendStream.start()
   logger.write('encoding stopped')
 })
 
 // init decoder for decoding
 initDecoder.addEventListener('click', async () => {
   logger.write('starting decoding...')
-  transport[1] = new Transport('recv', "https://localhost:4443/subscribe?stream_id=1", new Uint8Array(fingerprint))
+  transport[1] = new Transport('recv', "https://localhost:4443/subscribe?stream_id=1", new Uint8Array(fingerprint), globalMetrics)
   await transport[1].init()
 
-  const recvStream = new VideoRecvStream(
+  const videoStream = new VideoRecvStream(
     videoSendStream.ssrc,
     videoSendStream.encoder.decoderConfig!,
     transport[1],
   )
-  const generator = recvStream.track.track;
-  appendVideo('.remote', new MediaStream([generator as any]))
+  // const audioStream = new AudioRecvStream(
+  //   audioSendStream.ssrc,
+  //   audioSendStream.encoder.config,
+  //   transport[1],
+  // )
+  const videoGenerator = videoStream.track.track;
+  // const audioGenarator = audioStream.track.track;
+  appendVideo('.remoteVideo', new MediaStream([videoGenerator as any]))
+  // appendAudio('.remoteAudio', new MediaStream([audioGenarator as any]))
   videoSendStream.encoder.get_keyframe()
+  setInterval(() => {
+    const report = globalMetrics.get_stats()
+    framesCount.innerText = `Sent Frames: ${report.sent_frames}
+        Sent Bytes: ${report.sent_bytes} Bytes
+        Received Frames: ${report.recv_frames}
+        Received Bytes: ${report.recv_bytes} Bytes
+        Last sent at: ${report.last_sent_at}
+        Last received at: ${report.last_recv_at ?? "not yet"}
+        RTT: ${report.rtt} ms
+        `
+  }, 1000)
   // mediaWorker?.postMessage({
   //   type: 'init-decoder',
   // })
@@ -157,4 +182,11 @@ const appendVideo = (selector: string, stream: MediaStream) => {
   videoNode.autoplay = true
   videoNode.srcObject = stream
   document.querySelector<HTMLDivElement>(selector)!.append(videoNode)
+}
+
+const appendAudio = (selector: string, stream: MediaStream) => {
+  const audioNode = document.createElement("audio")
+  audioNode.autoplay = true
+  audioNode.srcObject = stream
+  document.querySelector<HTMLDivElement>(selector)!.append(audioNode)
 }
