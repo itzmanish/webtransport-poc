@@ -1,29 +1,30 @@
 use std::{
-    collections::HashMap,
-    io::Read,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
 use bytes::{buf::Reader, BytesMut};
 
+#[derive(Clone, Copy)]
 pub enum MediaKind {
     Audio,
     Video,
 }
 
+#[derive(Clone, Copy)]
 pub struct Packet {
     ssrc: u32,
     seq_no: u32,
     payload_type: MediaKind,
     size: usize,
-    payload: BytesMut,
+    payload: &'static [u8],
 }
 
 pub struct Bucket {
     pub ssrc: u32,
     pub kind: MediaKind,
 
-    buffer: Vec<Packet>,
+    buffer: VecDeque<Packet>,
 }
 
 impl Bucket {
@@ -31,14 +32,20 @@ impl Bucket {
         Bucket {
             ssrc,
             kind,
-            buffer: Vec::new(),
+            buffer: VecDeque::new(),
         }
     }
-}
 
-impl Read for Bucket {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.buffer.
+    pub fn read(&mut self, buf: &mut [Packet]) -> std::io::Result<usize> {
+        let mut length = buf.len();
+        if length > self.buffer.len() {
+            length = self.buffer.len();
+        }
+        for i in 0..length {
+            let packet = self.buffer.pop_front().unwrap();
+            buf[i] = packet;
+        }
+        Ok(length)
     }
 }
 
